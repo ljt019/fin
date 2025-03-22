@@ -178,10 +178,16 @@ function Index() {
       // Call the Tauri command to prompt the model
       await invoke("prompt_model", {
         modelPath: "C:\\Users\\lucie\\Desktop\\Projects\\personal\\fin\\model\\fin-r1.gguf", // Adjust the path to your model
-        systemPrompt:
-          "You are a helpful AI Assistant that provides well-reasoned responses, primarily related to financial questions. You first think about the reasoning process as an internal monologue and then provide the user with the answer. Respond in the following format only: <think>...</think><answer>...</answer>",
-        prompt: input,
-        maxTokens: 4096,
+        systemPrompt: "", // Not needed with the new approach
+        prompt: `<|im_start|>system
+You are a helpful AI Assistant that provides well-reasoned but concise responses with redundant overthinking, primarily related to financial questions. You first think about the reasoning process as an internal monologue within <think>...</think> xml tags, and then provide the user with the answer.
+<|im_end|>
+<|im_start|>user
+${input}
+<|im_end|>
+<|im_start|>assistant
+`,
+        maxTokens: 100000,
       });
     } catch (error) {
       console.error("Error prompting model:", error);
