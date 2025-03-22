@@ -1,6 +1,6 @@
 "use client";
 
-import type React from "react";
+import React from "react";
 
 import { createRoute } from "@tanstack/react-router";
 import { rootRoute } from "@/screens/root";
@@ -23,10 +23,12 @@ export const indexRoute = createRoute({
 function Index() {
   const [input, setInput] = useState("");
   const [response, setResponse] = useState("");
+  const [responseChunks, setResponseChunks] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [waitingForFirstToken, setWaitingForFirstToken] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
 
   // Sanitize text by replacing problematic characters
   const sanitizeText = (text: string): string => {
@@ -101,17 +103,24 @@ function Index() {
         // For the first token, remove any leading whitespace
         const sanitizedToken = sanitizeText(event.payload.trimStart());
         setResponse(sanitizedToken);
+        setResponseChunks([sanitizedToken]);
       } else {
         // For subsequent tokens, just sanitize
         const sanitizedToken = sanitizeText(event.payload);
         setResponse((prev) => prev + sanitizedToken);
+        setResponseChunks((prev) => [...prev, sanitizedToken]);
       }
+
+      // Scroll after each token
+      setTimeout(scrollToBottom, 0);
     });
 
     // Listen for model completion
     const unlistenComplete = listen("model-complete", () => {
       setIsLoading(false);
       setWaitingForFirstToken(false);
+      // Final scroll after completion
+      setTimeout(scrollToBottom, 0);
     });
 
     // Cleanup listeners on component unmount
@@ -121,48 +130,58 @@ function Index() {
     };
   }, [waitingForFirstToken]);
 
+  // Function to scroll to bottom
+  const scrollToBottom = () => {
+    if (viewportRef.current) {
+      viewportRef.current.scrollTop = viewportRef.current.scrollHeight;
+    } else if (scrollAreaRef.current) {
+      const viewport = scrollAreaRef.current.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      ) as HTMLDivElement;
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+        viewportRef.current = viewport;
+      }
+    }
+  };
+
+  // Find and store the viewport element when the component mounts
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      viewportRef.current = scrollAreaRef.current.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      ) as HTMLDivElement;
+    }
+  }, [scrollAreaRef.current]);
+
   // Scroll to bottom of response area when new content is added
   useEffect(() => {
-    if (!scrollAreaRef.current) return;
+    if (!scrollAreaRef.current || !response) return;
 
-    const scrollToBottom = () => {
-      const scrollContainer = scrollAreaRef.current?.querySelector(
-        "[data-radix-scroll-area-viewport]"
-      );
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    // Scroll immediately and set up an interval to keep scrolling while tokens are streaming
+    scrollToBottom();
+
+    // Use an interval to ensure smooth scrolling while tokens are being generated
+    const scrollInterval = setInterval(() => {
+      if (isLoading || waitingForFirstToken) {
+        scrollToBottom();
+      } else {
+        clearInterval(scrollInterval);
       }
-    };
+    }, 100);
 
-    // Setup mutation observer to react to DOM changes
-    const responseContainer = scrollAreaRef.current.querySelector("div > div.p-4");
-    if (responseContainer) {
-      const observer = new MutationObserver((mutations) => {
-        // Only scroll if we're observing content mutations related to the response
-        if (mutations.some((m) => m.type === "childList" || m.type === "characterData")) {
-          scrollToBottom();
-        }
-      });
+    return () => clearInterval(scrollInterval);
+  }, [response, isLoading, waitingForFirstToken]);
 
-      observer.observe(responseContainer, {
-        childList: true,
-        subtree: true,
-        characterData: true,
-      });
-
-      // Immediate scroll
-      scrollToBottom();
-
-      return () => observer.disconnect();
+  // Set up a separate mechanism for the initial loading state
+  useEffect(() => {
+    if (waitingForFirstToken) {
+      const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]");
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
     }
-
-    // Fallback if we can't find the response container
-    if (response) {
-      scrollToBottom();
-      const timeout = setTimeout(scrollToBottom, 50);
-      return () => clearTimeout(timeout);
-    }
-  }, [response, waitingForFirstToken]);
+  }, [waitingForFirstToken]);
 
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -226,31 +245,9 @@ ${input}
           ref={scrollAreaRef}
         >
           {response || waitingForFirstToken ? (
-            <ScrollArea className="h-full" type="hover">
-              <div className="p-4">
-                {response ? (
-                  <div className="prose prose-sm max-w-none text-foreground/90 whitespace-pre-wrap font-mono">
-                    {response.split("").map((char, index) => {
-                      // Special handling for newlines
-                      if (char === "\n") {
-                        return <br key={index} />;
-                      }
-
-                      return (
-                        <span
-                          key={index}
-                          className="inline opacity-0"
-                          style={{
-                            animation: "fadeInLeftToRight 0.3s ease-out forwards",
-                            animationDelay: `${Math.min(index * 0.008, 0.4)}s`,
-                          }}
-                        >
-                          {char}
-                        </span>
-                      );
-                    })}
-                  </div>
-                ) : (
+            <ScrollArea className="h-full" type="hover" scrollHideDelay={0}>
+              <div className="p-4" id="response-container">
+                {waitingForFirstToken ? (
                   <div className="prose prose-sm max-w-none text-foreground/90">
                     <div className="inline-flex gap-1.5">
                       <div
@@ -266,6 +263,34 @@ ${input}
                         style={{ animationDelay: "300ms" }}
                       ></div>
                     </div>
+                  </div>
+                ) : (
+                  <div className="prose prose-sm max-w-none text-foreground/90 whitespace-pre-wrap font-mono">
+                    {/* Render chunks instead of individual characters */}
+                    {responseChunks.map((chunk, index) => {
+                      // Process newlines in chunks
+                      if (chunk === "\n") {
+                        return <br key={`chunk-${index}`} />;
+                      }
+
+                      return (
+                        <span
+                          key={`chunk-${index}`}
+                          className="inline-block opacity-0"
+                          style={{
+                            animation: "fadeInLeftToRight 0.3s ease-out forwards",
+                            animationDelay: `${Math.min(index * 0.008, 0.2)}s`,
+                          }}
+                        >
+                          {chunk.split("\n").map((part, i) => (
+                            <React.Fragment key={`part-${index}-${i}`}>
+                              {i > 0 && <br />}
+                              {part}
+                            </React.Fragment>
+                          ))}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
               </div>
