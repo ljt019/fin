@@ -1,8 +1,18 @@
 "use client";
 
-import { createRoute, useNavigate } from "@tanstack/react-router";
+import type React from "react";
+
+import { createRoute } from "@tanstack/react-router";
 import { rootRoute } from "@/screens/root";
-import { ArrowRight, Github, FileCode, Heart, ExternalLink } from "lucide-react";
+import { Send } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 export const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -10,162 +20,299 @@ export const indexRoute = createRoute({
   component: Index,
 });
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
 function Index() {
-  const navigate = useNavigate();
+  const [input, setInput] = useState("");
+  const [response, setResponse] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [waitingForFirstToken, setWaitingForFirstToken] = useState(false);
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const features = [
-    {
-      icon: <img src="/tauri.svg" className="size-10" />,
-      title: "Tauri",
-      description: "Build secure and lightweight desktop applications with web technologies",
-      url: "https://tauri.app/",
-    },
-    {
-      icon: <img src="/vite.svg" className="size-10" />,
-      title: "Vite & React 18",
-      description: "Fast development with modern UI capabilities",
-      url: "https://vitejs.dev/",
-    },
-    {
-      icon: <img src="/typescript.svg" className="size-10" />,
-      title: "TypeScript",
-      description: "Type-safe development experience",
-      url: "https://www.typescriptlang.org/",
-    },
-    {
-      icon: <img src="/tailwind.svg" className="size-10" />,
-      title: "Tailwind",
-      description: "Utility-first CSS for rapid UI development",
-      url: "https://tailwindcss.com/",
-    },
-    {
-      icon: <img src="/react-query.svg" className="size-10" />,
-      title: "TanStack Router & Query",
-      description: "Type-safe routing and efficient data fetching",
-      url: "https://tanstack.com/",
-    },
-    {
-      icon: <img src="/shadcn.svg" className="size-10" />,
-      title: "ShadCN UI",
-      description: "Accessible and customizable components",
-      url: "https://ui.shadcn.com/",
-    },
-  ];
+  // Sanitize text by replacing problematic characters
+  const sanitizeText = (text: string): string => {
+    // Replace non-ASCII characters with their ASCII equivalents or empty string
+    return (
+      text
+        // Basic ASCII replacements
+        .replace(/['']/g, "'")
+        .replace(/[""]/g, '"')
+        .replace(/…/g, "...")
+        .replace(/—/g, "-")
+        .replace(/–/g, "-")
+        // Replace any problematic Unicode characters
+        .replace(/[\u0080-\uFFFF]/g, (match) => {
+          // Check for common sequences and replace appropriately
+          if (/[\u2018\u2019]/.test(match)) return "'"; // Smart quotes (single)
+          if (/[\u201C\u201D]/.test(match)) return '"'; // Smart quotes (double)
+          if (match === "\u2026") return "..."; // Ellipsis
+          if (match === "\u2013" || match === "\u2014") return "-"; // En/em dash
+          if (match === "\u2022") return "*"; // Bullet point
+          if (match === "\u00A9") return "(c)"; // Copyright
+          if (match === "\u00AE") return "(r)"; // Registered trademark
+          if (match === "\u2122") return "TM"; // Trademark
+          if (match === "\u20AC") return "EUR"; // Euro
+          if (match === "\u00A3") return "GBP"; // Pound
+          if (match === "\u00A5") return "JPY"; // Yen
+          if (match === "\n" || match === "\r" || match === "\u000D" || match === "\u000A")
+            return "\n"; // Newlines
+          return ""; // Replace any other non-ASCII char with empty string
+        })
+    );
+  };
+
+  // Define custom animation style
+  const animationStyle = `
+    @keyframes fadeInLeftToRight {
+      0% {
+        opacity: 0;
+        transform: translateX(-5px);
+        filter: blur(3px);
+      }
+      60% {
+        opacity: 0.8;
+        transform: translateX(-1px);
+        filter: blur(1px);
+      }
+      100% {
+        opacity: 1;
+        transform: translateX(0);
+        filter: blur(0);
+      }
+    }
+  `;
+
+  // Auto-resize textarea as content grows
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    }
+  }, [input]);
+
+  // Setup event listeners for model tokens
+  useEffect(() => {
+    // Listen for tokens from the model
+    const unlisten = listen<string>("model-token", (event) => {
+      // If this is the first token, stop showing the loading indicator
+      if (waitingForFirstToken) {
+        setWaitingForFirstToken(false);
+
+        // For the first token, remove any leading whitespace
+        const sanitizedToken = sanitizeText(event.payload.trimStart());
+        setResponse(sanitizedToken);
+      } else {
+        // For subsequent tokens, just sanitize
+        const sanitizedToken = sanitizeText(event.payload);
+        setResponse((prev) => prev + sanitizedToken);
+      }
+    });
+
+    // Listen for model completion
+    const unlistenComplete = listen("model-complete", () => {
+      setIsLoading(false);
+      setWaitingForFirstToken(false);
+    });
+
+    // Cleanup listeners on component unmount
+    return () => {
+      unlisten.then((fn) => fn());
+      unlistenComplete.then((fn) => fn());
+    };
+  }, [waitingForFirstToken]);
+
+  // Scroll to bottom of response area when new content is added
+  useEffect(() => {
+    if (!scrollAreaRef.current) return;
+
+    const scrollToBottom = () => {
+      const scrollContainer = scrollAreaRef.current?.querySelector(
+        "[data-radix-scroll-area-viewport]"
+      );
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+    };
+
+    // Setup mutation observer to react to DOM changes
+    const responseContainer = scrollAreaRef.current.querySelector("div > div.p-4");
+    if (responseContainer) {
+      const observer = new MutationObserver((mutations) => {
+        // Only scroll if we're observing content mutations related to the response
+        if (mutations.some((m) => m.type === "childList" || m.type === "characterData")) {
+          scrollToBottom();
+        }
+      });
+
+      observer.observe(responseContainer, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+
+      // Immediate scroll
+      scrollToBottom();
+
+      return () => observer.disconnect();
+    }
+
+    // Fallback if we can't find the response container
+    if (response) {
+      scrollToBottom();
+      const timeout = setTimeout(scrollToBottom, 50);
+      return () => clearTimeout(timeout);
+    }
+  }, [response, waitingForFirstToken]);
+
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    if (!input.trim() || isLoading) return;
+
+    try {
+      setIsLoading(true);
+      setWaitingForFirstToken(true);
+      setResponse("");
+
+      // Call the Tauri command to prompt the model
+      await invoke("prompt_model", {
+        modelPath: "C:\\Users\\lucie\\Desktop\\Projects\\personal\\fin\\model\\fin-r1.gguf", // Adjust the path to your model
+        systemPrompt:
+          "You are a helpful AI Assistant that provides well-reasoned responses, primarily related to financial questions. You first think about the reasoning process as an internal monologue and then provide the user with the answer. Respond in the following format only: <think>...</think><answer>...</answer>",
+        prompt: input,
+        maxTokens: 4096,
+      });
+    } catch (error) {
+      console.error("Error prompting model:", error);
+      setResponse("Error: " + String(error));
+      setIsLoading(false);
+      setWaitingForFirstToken(false);
+    }
+  };
+
+  // Handle keyboard shortcuts
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Submit on Enter (not in combination with Shift key for newlines)
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const form = e.currentTarget.closest("form");
+      if (form) form.requestSubmit();
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-muted/30 p-4">
-      <div className="max-w-5xl mx-auto pt-8 pb-16">
-        <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold tracking-tight mb-4">Tauri React Template</h1>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-            A robust and feature-rich template for building desktop applications
+    <div className="fixed inset-0 flex flex-col h-screen overflow-hidden">
+      <style dangerouslySetInnerHTML={{ __html: animationStyle }} />
+      <div className="max-w-5xl w-full mx-auto flex flex-col h-full px-6 sm:px-8 py-4 pt-8">
+        <div className="flex-shrink-0 mb-6">
+          <h1 className="text-2xl font-bold text-foreground/90 tracking-tight">Fin-R1</h1>
+          <p className="text-sm text-muted-foreground/70">
+            Fin-R1 is a financial reasoning language model built on Qwen2.5-7B-Instruct and
+            fine-tuned with high-quality, verifiable financial problem datasets. The model achieves
+            state-of-the-art performance on multiple financial benchmarks, making it particularly
+            effective for complex financial reasoning tasks.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-          {features.map((feature, index) => (
-            <Card key={index} className="border bg-card">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-2 rounded-md bg-primary/10 text-primary">{feature.icon}</div>
-                    <CardTitle className="text-lg">{feature.title}</CardTitle>
+        <Card
+          className="flex-1 min-h-0 mb-6 bg-primary/2 border-none shadow-sm overflow-hidden"
+          ref={scrollAreaRef}
+        >
+          {response || waitingForFirstToken ? (
+            <ScrollArea className="h-full" type="hover">
+              <div className="p-4">
+                {response ? (
+                  <div className="prose prose-sm max-w-none text-foreground/90 whitespace-pre-wrap font-mono">
+                    {response.split("").map((char, index) => {
+                      // Special handling for newlines
+                      if (char === "\n") {
+                        return <br key={index} />;
+                      }
+
+                      return (
+                        <span
+                          key={index}
+                          className="inline opacity-0"
+                          style={{
+                            animation: "fadeInLeftToRight 0.3s ease-out forwards",
+                            animationDelay: `${Math.min(index * 0.008, 0.4)}s`,
+                          }}
+                        >
+                          {char}
+                        </span>
+                      );
+                    })}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full"
-                    onClick={() => window.open(feature.url, "_blank")}
-                  >
-                    <ExternalLink className="h-4 w-4" />
-                    <span className="sr-only">Visit {feature.title} website</span>
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground">{feature.description}</p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <Card className="border bg-card/50 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle>Welcome to Your New App!</CardTitle>
-            <CardDescription>
-              Your Tauri React Template is up and running successfully
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="rounded-md bg-primary/10 p-4 border border-primary/20">
-              <h3 className="font-medium flex items-center gap-2 mb-2">
-                <FileCode className="h-4 w-4" />
-                Next Steps
-              </h3>
-              <ul className="list-disc pl-5 space-y-1 text-sm">
-                <li>
-                  Edit{" "}
-                  <code className="text-xs bg-muted px-1 py-0.5 rounded">
-                    src/screens/Index.tsx
-                  </code>{" "}
-                  to customize this landing page
-                </li>
-                <li>
-                  Create new routes in{" "}
-                  <code className="text-xs bg-muted px-1 py-0.5 rounded">src/screens/</code>{" "}
-                  directory
-                </li>
-                <li>
-                  Add components in{" "}
-                  <code className="text-xs bg-muted px-1 py-0.5 rounded">src/components/</code>
-                </li>
-                <li>
-                  Configure Tauri in{" "}
-                  <code className="text-xs bg-muted px-1 py-0.5 rounded">src-tauri/</code> directory
-                </li>
-              </ul>
-            </div>
-
-            <div className="flex items-center justify-between rounded-lg border p-4">
-              <div className="space-y-0.5">
-                <h3 className="font-medium">Try the counter example</h3>
-                <p className="text-sm text-muted-foreground">
-                  Visit the About page to see a working counter component
-                </p>
+                ) : (
+                  <div className="prose prose-sm max-w-none text-foreground/90">
+                    <div className="inline-flex gap-1.5">
+                      <div
+                        className="w-2 h-2 rounded-full bg-foreground/40 animate-bounce"
+                        style={{ animationDelay: "0ms" }}
+                      ></div>
+                      <div
+                        className="w-2 h-2 rounded-full bg-foreground/40 animate-bounce"
+                        style={{ animationDelay: "150ms" }}
+                      ></div>
+                      <div
+                        className="w-2 h-2 rounded-full bg-foreground/40 animate-bounce"
+                        style={{ animationDelay: "300ms" }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
               </div>
-              <Button onClick={() => navigate({ to: "/about" })} className="gap-2">
-                View Example
-                <ArrowRight className="h-4 w-4" />
-              </Button>
+            </ScrollArea>
+          ) : (
+            <div className="h-full w-full flex items-center justify-center">
+              <div className="text-muted-foreground/70 italic text-sm">
+                Ask Fin-R1 any financial question...
+              </div>
             </div>
-          </CardContent>
-          <CardFooter className="flex justify-between items-center border-t pt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2 text-xs"
-              onClick={() => window.open("https://github.com/ljt019", "_blank")}
-            >
-              <Github className="h-3.5 w-3.5" />
-              GitHub: ljt019
-            </Button>
-            <div className="flex items-center text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
-                Made with <Heart className="h-3 w-3 text-red-500" /> by Lucien Thomas
-              </span>
-            </div>
-          </CardFooter>
+          )}
         </Card>
+
+        <div className="w-full mb-4 flex-shrink-0">
+          <form onSubmit={handleSubmit} className="w-full flex gap-2 relative">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type your message here..."
+              className="resize-none flex-1 min-h-[44px] max-h-[200px] border-none bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/50"
+              disabled={isLoading}
+            />
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isLoading}
+              className={cn(
+                "h-10 w-10 rounded-full shrink-0 self-end transition-all",
+                "bg-transparent hover:bg-foreground/10 text-foreground",
+                isLoading && "opacity-50"
+              )}
+            >
+              <Send
+                className={cn(
+                  "h-4 w-4 transition-transform",
+                  isLoading ? "opacity-0" : "opacity-100"
+                )}
+              />
+              {isLoading && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="h-4 w-4 border-2 border-foreground/30 border-t-foreground/80 rounded-full animate-spin"></div>
+                </div>
+              )}
+              <span className="sr-only">Send message</span>
+            </Button>
+          </form>
+
+          <div className="text-xs text-muted-foreground/50 text-center mt-2">
+            Press Enter to send
+          </div>
+        </div>
       </div>
     </div>
   );
