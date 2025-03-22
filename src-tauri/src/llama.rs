@@ -68,7 +68,14 @@ pub fn prompt<F>(
             buffer.clear();
 
             // Apply replacements
-            let filtered_str = utf8_str.replace('Ġ', " ").replace("ĊĊ", "\n");
+            let filtered_str = utf8_str
+                .replace('Ġ', " ") // Space character
+                .replace("ĊĊ", "\n") // Double newline
+                .replace('Ċ', "\n") // Single newline
+                .replace('Ĉ', "\t") // Tab character
+                .replace("â€™", "'") // Apostrophe (common encoding issue)
+                .replace("â€œ", "\"") // Left double quote
+                .replace("â€", "\""); // Right double quote
 
             // Send to callback
             if !filtered_str.is_empty() {
@@ -81,7 +88,15 @@ pub fn prompt<F>(
             // If we have any remaining bytes in the buffer, try to process them
             if !buffer.is_empty() {
                 if let Ok(remaining) = String::from_utf8(buffer.clone()) {
-                    let filtered = remaining.replace('Ġ', " ").replace("ĊĊ", "\n");
+                    let filtered = remaining
+                        .replace('Ġ', " ") // Space character
+                        .replace("ĊĊ", "\n") // Double newline
+                        .replace('Ċ', "\n") // Single newline
+                        .replace('Ĉ', "\t") // Tab character
+                        .replace("â€™", "'") // Apostrophe (common encoding issue)
+                        .replace("â€œ", "\"") // Left double quote
+                        .replace("â€", "\""); // Right double quote
+
                     if !filtered.is_empty() {
                         token_callback(filtered);
                     }
@@ -94,7 +109,15 @@ pub fn prompt<F>(
     // Process any remaining bytes in the buffer
     if !buffer.is_empty() {
         if let Ok(remaining) = String::from_utf8(buffer) {
-            let filtered = remaining.replace('Ġ', " ").replace("ĊĊ", "\n");
+            let filtered = remaining
+                .replace('Ġ', " ") // Space character
+                .replace("ĊĊ", "\n") // Double newline
+                .replace('Ċ', "\n") // Single newline
+                .replace('Ĉ', "\t") // Tab character
+                .replace("â€™", "'") // Apostrophe (common encoding issue)
+                .replace("â€œ", "\"") // Left double quote
+                .replace("â€", "\""); // Right double quote
+
             if !filtered.is_empty() {
                 token_callback(filtered);
             }
