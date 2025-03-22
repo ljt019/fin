@@ -7,7 +7,6 @@ const DEFAULT_MAX_TOKENS: usize = 100000;
 
 pub fn prompt<F>(
     model_file_path: &str,
-    system_prompt: &str,
     prompt: &str,
     mut token_callback: F,
     max_tokens: Option<usize>,

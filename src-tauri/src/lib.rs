@@ -8,16 +8,10 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-fn prompt_model(
-    window: tauri::Window,
-    model_path: &str,
-    system_prompt: &str,
-    prompt: &str,
-    max_tokens: Option<usize>,
-) -> Result<(), String> {
+fn prompt_model(window: tauri::Window, prompt: &str) -> Result<(), String> {
     // Clone the string data so the thread owns it
-    let model_path = model_path.to_string();
-    let system_prompt = system_prompt.to_string();
+    let model_path =
+        "C:\\Users\\lucie\\Desktop\\Projects\\personal\\fin\\model\\fin-r1.gguf".to_string();
     let prompt = prompt.to_string();
 
     // Create a clone of the window that we can move into the callback
@@ -25,15 +19,21 @@ fn prompt_model(
 
     // Call the llama prompt function with a callback that emits events to the frontend
     std::thread::spawn(move || {
+        // Format the prompt with the necessary tags
+        let formatted_prompt = format!(
+            "<|im_start|>system\n{}\n<|im_end|>\n<|im_start|>user\n{}\n<|im_end|>\n<|im_start|>assistant\n",
+            "You are a helpful AI Assistant that provides well-reasoned but concise responses with redundant overthinking, primarily related to financial questions. You first think about the reasoning process as an internal monologue within <think>...</think> xml tags, and then provide the user with the answer.",
+            prompt
+        );
+
         llama::prompt(
             &model_path,
-            &system_prompt,
-            &prompt,
+            &formatted_prompt,
             |token| {
                 // Emit an event to the frontend with the token
                 let _ = window_clone.emit("model-token", token);
             },
-            max_tokens,
+            Some(100000), // Max tokens
         );
 
         // Signal that the generation is complete
