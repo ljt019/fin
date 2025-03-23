@@ -2,124 +2,159 @@ use llama_cpp::standard_sampler::StandardSampler;
 use llama_cpp::LlamaModel;
 use llama_cpp::LlamaParams;
 use llama_cpp::SessionParams;
+use regex::Regex;
+use tokenizers::Tokenizer;
 
+const MODEL_FILE_PATH: &str =
+    "C:\\Users\\lucie\\Desktop\\Projects\\personal\\fin\\model\\fin-r1.gguf";
+const TOKENIZER_FILE_PATH: &str =
+    "C:\\Users\\lucie\\Desktop\\Projects\\personal\\fin\\model\\tokenizer.json";
 const DEFAULT_MAX_TOKENS: usize = 100000;
 
-pub fn prompt<F>(
-    model_file_path: &str,
+struct Message {
+    role: String,
+    content: String,
+}
+
+fn format_message(message: &Message) -> String {
+    format!(
+        "<|im_start|>{}\n{}\n<|im_end|>",
+        message.role, message.content
+    )
+}
+
+fn format_messages(messages: Vec<Message>) -> String {
+    let formatted = messages
+        .iter()
+        .map(format_message)
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    format!("{}\n<|im_start|>assistant\n", formatted)
+}
+
+pub fn prompt<FA, FT>(
+    system_prompt: &str,
     prompt: &str,
-    mut token_callback: F,
-    max_tokens: Option<usize>,
+    mut answer_token_callback: FA,
+    mut thought_token_callback: FT,
 ) where
-    F: FnMut(String),
+    FA: FnMut(String),
+    FT: FnMut(String),
 {
+    let tokenizer = Tokenizer::from_file(TOKENIZER_FILE_PATH).expect("Failed to load tokenizer");
     let model_params = LlamaParams::default();
 
     let model =
-        LlamaModel::load_from_file(model_file_path, model_params).expect("Could not load model");
+        LlamaModel::load_from_file(MODEL_FILE_PATH, model_params).expect("Could not load model");
 
-    // Create a session
     let mut session_params = SessionParams::default();
-    // Increase context size to handle longer outputs
-    session_params.n_ctx = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS) as u32;
+    session_params.n_ctx = DEFAULT_MAX_TOKENS as u32;
 
     let mut ctx = model
         .create_session(session_params)
         .expect("Failed to create session");
 
-    // Feed the entire formatted prompt at once
-    // The prompt should already contain the system message, user message, and assistant prefix
-    ctx.advance_context(prompt).expect("Failed to add prompt");
+    let messages = vec![
+        Message {
+            role: "system".to_string(),
+            content: system_prompt.to_string(),
+        },
+        Message {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+        },
+    ];
 
-    // Use provided max_tokens or fall back to default
-    let max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+    let formatted_prompt = format_messages(messages);
 
-    // Create a sampler with specific settings using SamplerStage
+    ctx.advance_context(formatted_prompt)
+        .expect("Failed to add prompt");
+
+    let max_tokens = DEFAULT_MAX_TOKENS as u32;
+
     let stages = vec![
         llama_cpp::standard_sampler::SamplerStage::Temperature(0.7),
-        llama_cpp::standard_sampler::SamplerStage::TopP(0.9), // Increased from 0.8
+        llama_cpp::standard_sampler::SamplerStage::TopP(0.8),
         llama_cpp::standard_sampler::SamplerStage::RepetitionPenalty {
-            repetition_penalty: 1.1, // Slightly increased
+            repetition_penalty: 1.05,
             frequency_penalty: 0.0,
             presence_penalty: 0.0,
-            last_n: 128, // Increased from 64
+            last_n: 128,
         },
     ];
     let sampler = StandardSampler::new_softmax(stages, 1);
 
-    // Handle the Result from start_completing_with
     let completion_handle = ctx
-        .start_completing_with(sampler, max_tokens)
+        .start_completing_with(sampler, max_tokens as usize)
         .expect("Failed to start completion");
 
-    // For building up complete UTF-8 sequences
-    let mut buffer = Vec::new();
-    let mut decoded_tokens = 0;
+    let mut buffer = String::new();
+    let tag_regex = Regex::new(r"<(/?think|/?answer|\|im_end\|)>").unwrap();
 
-    // Process tokens and pass them to the callback
+    enum ParseState {
+        Idle,
+        Think,
+        Answer,
+    }
+
+    let mut state = ParseState::Idle;
+
     for token in completion_handle {
-        // Instead of detokenizing each token individually, accumulate them
-        buffer.extend_from_slice(&model.detokenize(token));
+        let token_id = token.0 as u32;
 
-        // Try to extract valid UTF-8 sequences from the buffer
-        if let Ok(utf8_str) = String::from_utf8(buffer.clone()) {
-            // Clear the buffer since we've consumed all valid UTF-8
-            buffer.clear();
+        let decoded_text = tokenizer
+            .decode(&[token_id], false)
+            .expect("Failed to decode token");
 
-            // Apply replacements
-            let filtered_str = utf8_str
-                .replace('Ġ', " ") // Space character
-                .replace("ĊĊ", "\n") // Double newline
-                .replace('Ċ', "\n") // Single newline
-                .replace('Ĉ', "\t") // Tab character
-                .replace("â€™", "'") // Apostrophe (common encoding issue)
-                .replace("â€œ", "\"") // Left double quote
-                .replace("â€", "\""); // Right double quote
+        buffer.push_str(&decoded_text);
 
-            // Send to callback
-            if !filtered_str.is_empty() {
-                token_callback(filtered_str);
+        while let Some(mat) = tag_regex.find(&buffer) {
+            let (before_tag, tag) = buffer.split_at(mat.start());
+
+            if !before_tag.is_empty() {
+                match state {
+                    ParseState::Think => thought_token_callback(before_tag.to_string()),
+                    ParseState::Answer => answer_token_callback(before_tag.to_string()),
+                    ParseState::Idle => {}
+                }
             }
+
+            state = match &tag[..mat.end() - mat.start()] {
+                "<think>" => ParseState::Think,
+                "</think>" => ParseState::Idle,
+                "<answer>" => ParseState::Answer,
+                "</answer>" => ParseState::Idle,
+                "<|im_end|>" => ParseState::Idle,
+                _ => state,
+            };
+
+            buffer = tag[mat.end() - mat.start()..].to_string();
         }
 
-        decoded_tokens += 1;
-        if decoded_tokens >= max_tokens {
-            // If we have any remaining bytes in the buffer, try to process them
-            if !buffer.is_empty() {
-                if let Ok(remaining) = String::from_utf8(buffer.clone()) {
-                    let filtered = remaining
-                        .replace('Ġ', " ") // Space character
-                        .replace("ĊĊ", "\n") // Double newline
-                        .replace('Ċ', "\n") // Single newline
-                        .replace('Ĉ', "\t") // Tab character
-                        .replace("â€™", "'") // Apostrophe (common encoding issue)
-                        .replace("â€œ", "\"") // Left double quote
-                        .replace("â€", "\""); // Right double quote
+        // Check if buffer ends with potential incomplete tag
+        let partial_tag = buffer.rfind('<').map(|idx| &buffer[idx..]);
+        if let Some(tag) = partial_tag {
+            if !tag_regex.is_match(tag) && tag.len() < 10 {
+                let emit_up_to = buffer.len() - tag.len();
+                let emit_content = buffer[..emit_up_to].to_string();
+                buffer = buffer[emit_up_to..].to_string();
 
-                    if !filtered.is_empty() {
-                        token_callback(filtered);
+                if !emit_content.is_empty() {
+                    match state {
+                        ParseState::Think => thought_token_callback(emit_content),
+                        ParseState::Answer => answer_token_callback(emit_content),
+                        ParseState::Idle => {}
                     }
                 }
             }
-            break;
-        }
-    }
-
-    // Process any remaining bytes in the buffer
-    if !buffer.is_empty() {
-        if let Ok(remaining) = String::from_utf8(buffer) {
-            let filtered = remaining
-                .replace('Ġ', " ") // Space character
-                .replace("ĊĊ", "\n") // Double newline
-                .replace('Ċ', "\n") // Single newline
-                .replace('Ĉ', "\t") // Tab character
-                .replace("â€™", "'") // Apostrophe (common encoding issue)
-                .replace("â€œ", "\"") // Left double quote
-                .replace("â€", "\""); // Right double quote
-
-            if !filtered.is_empty() {
-                token_callback(filtered);
+        } else if !buffer.is_empty() {
+            match state {
+                ParseState::Think => thought_token_callback(buffer.clone()),
+                ParseState::Answer => answer_token_callback(buffer.clone()),
+                ParseState::Idle => {}
             }
+            buffer.clear();
         }
     }
 }
