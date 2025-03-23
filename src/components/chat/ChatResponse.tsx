@@ -257,7 +257,7 @@ export function ChatResponse({
               <div
                 className={cn(
                   "overflow-hidden transition-all duration-300 relative rounded-[var(--radius-sm)]",
-                  showThinking ? "max-h-[500px] opacity-100 p-3" : "max-h-0 opacity-0 py-0 px-3"
+                  showThinking ? "opacity-100 p-3" : "max-h-0 opacity-0 py-0 px-3"
                 )}
               >
                 {/* Gradient border overlay - Top */}
