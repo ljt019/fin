@@ -121,7 +121,7 @@
 }
 
 .animate-token {
-  animation: fadeInLeftToRight 0.3s ease-out forwards;
+  animation: fadeInLeftToRight 0.1s ease-out forwards;
   white-space: pre-wrap;
   display: inline;
   will-change: opacity, transform;

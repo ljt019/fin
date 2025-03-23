@@ -24,13 +24,29 @@ export function ChatResponse({
   waitingForFirstToken,
   isLoading,
 }: ChatResponseProps) {
-  const [showThinking, setShowThinking] = useState(true); // Start expanded
+  const [showThinking, setShowThinking] = useState(true);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const responseRef = useRef<HTMLDivElement>(null);
-  const thinkingRef = useRef<HTMLDivElement>(null);
   const [hasThinkingContent, setHasThinkingContent] = useState(false);
   const [isAnswering, setIsAnswering] = useState(false);
+
+  // Thinking states
+  const [completedThinkingText, setCompletedThinkingText] = useState("");
+  const [currentThinkingToken, setCurrentThinkingToken] = useState("");
+
+  // Answering states
+  const [completedAnswerText, setCompletedAnswerText] = useState("");
+  const [currentAnswerToken, setCurrentAnswerToken] = useState("");
+
+  // References for animation timing
+  const lastThinkingUpdateRef = useRef<number>(0);
+  const lastAnswerUpdateRef = useRef<number>(0);
+  const animationFrameIdRef = useRef<number | null>(null);
+  const TARGET_FRAME_DURATION = 50; // Target ~50ms between updates
+
+  // Create persistent token buffer refs outside the effect
+  const thinkingTokenBufferRef = useRef<string>("");
+  const answerTokenBufferRef = useRef<string>("");
 
   const scrollToBottom = () => {
     if (viewportRef.current) {
@@ -59,87 +75,148 @@ export function ChatResponse({
     scrollToBottom();
   }, [thinkingTrigger, answerTrigger, waitingForFirstToken]);
 
-  // Helper function to process tokens with animation
-  const processTokens = (
-    text: string,
-    containerRef: React.RefObject<HTMLDivElement>,
-    isFirstContent: boolean
-  ) => {
-    if (!text || !containerRef.current) return;
-
-    // Create a document fragment to batch DOM changes
-    const fragment = document.createDocumentFragment();
-
-    // Split by newlines to properly handle paragraph breaks
-    const lines = text.split("\n");
-
-    // Skip empty lines at the beginning if this is the first content
-    let startIndex = 0;
-    if (isFirstContent && containerRef.current.childNodes.length === 0) {
-      while (startIndex < lines.length && lines[startIndex].trim() === "") {
-        startIndex++;
-      }
+  // Reset state when waiting for a new response
+  useEffect(() => {
+    if (waitingForFirstToken) {
+      setIsAnswering(false);
     }
-
-    lines.slice(startIndex).forEach((line, index) => {
-      // Add the text content
-      if (line.length > 0) {
-        // Split by spaces, but keep the spaces
-        const words = line.split(/(\s+)/);
-
-        words.forEach((word) => {
-          if (word.length > 0) {
-            const span = document.createElement("span");
-            span.textContent = word;
-            // Display inline to allow natural text wrapping
-            span.className = "inline opacity-0 animate-token";
-            fragment.appendChild(span);
-          }
-        });
-      }
-
-      // Add line break if not the last line
-      if (index < lines.length - startIndex - 1) {
-        fragment.appendChild(document.createElement("br"));
-      }
-    });
-
-    // Append all changes at once
-    containerRef.current.appendChild(fragment);
-  };
+  }, [waitingForFirstToken]);
 
   // Process thinking tokens
   useEffect(() => {
-    if (thinkingBufferRef.current && thinkingRef.current) {
+    if (thinkingBufferRef.current) {
       // If we have any content, make sure the section is visible
       if (thinkingBufferRef.current.trim() !== "") {
         setHasThinkingContent(true);
+        // If we get new thinking tokens, we're not in answering phase
+        setIsAnswering(false);
       }
 
-      // Process tokens with the same animation as answer tokens
-      processTokens(thinkingBufferRef.current, thinkingRef, true);
+      // Split by newlines and words, preserving spaces
+      const lines = thinkingBufferRef.current.split("\n");
+      const tokens: string[] = [];
 
-      // Clear the buffer
+      lines.forEach((line, index) => {
+        if (line.length > 0) {
+          // Split by spaces but keep the spaces
+          const words = line.split(/(\s+)/);
+          tokens.push(...words);
+        }
+        // Add line break if not the last line
+        if (index < lines.length - 1) {
+          tokens.push("\n");
+        }
+      });
+
+      // Update the current thinking token
+      setCurrentThinkingToken(tokens.join(""));
       thinkingBufferRef.current = "";
-
-      // Force scroll update
-      setTimeout(scrollToBottom, 0);
     }
   }, [thinkingTrigger]);
 
   // Process answer tokens
   useEffect(() => {
-    if (answerBufferRef.current && responseRef.current) {
+    if (answerBufferRef.current) {
       // We now have answer tokens, so thinking phase is done
       setIsAnswering(true);
 
-      // Process tokens with animation
-      processTokens(answerBufferRef.current, responseRef, true);
+      // Split by newlines and words, preserving spaces
+      const lines = answerBufferRef.current.split("\n");
+      const tokens: string[] = [];
 
-      // Clear the buffer
+      lines.forEach((line, index) => {
+        if (line.length > 0) {
+          // Split by spaces but keep the spaces
+          const words = line.split(/(\s+)/);
+          tokens.push(...words);
+        }
+        // Add line break if not the last line
+        if (index < lines.length - 1) {
+          tokens.push("\n");
+        }
+      });
+
+      // Update the current answer token
+      setCurrentAnswerToken(tokens.join(""));
       answerBufferRef.current = "";
     }
   }, [answerTrigger]);
+
+  // Combined token batching logic using requestAnimationFrame
+  useEffect(() => {
+    let rafId: number;
+    let lastUpdate = performance.now();
+
+    // Add new tokens to our persistent buffers
+    if (currentThinkingToken) {
+      thinkingTokenBufferRef.current += currentThinkingToken;
+    }
+
+    if (currentAnswerToken) {
+      answerTokenBufferRef.current += currentAnswerToken;
+    }
+
+    const flushBuffers = () => {
+      rafId = requestAnimationFrame((now) => {
+        const elapsed = now - lastUpdate;
+
+        // Change back to 100ms as requested
+        if (elapsed >= 100) {
+          let updated = false;
+
+          // Process thinking tokens if we have any
+          if (thinkingTokenBufferRef.current) {
+            setCompletedThinkingText((prev) => prev + thinkingTokenBufferRef.current);
+            thinkingTokenBufferRef.current = ""; // Clear buffer after processing
+            updated = true;
+          }
+
+          // Process answer tokens if we have any
+          if (answerTokenBufferRef.current) {
+            setCompletedAnswerText((prev) => prev + answerTokenBufferRef.current);
+            answerTokenBufferRef.current = ""; // Clear buffer after processing
+            updated = true;
+          }
+
+          // Clear current token states
+          if (currentThinkingToken) {
+            setCurrentThinkingToken("");
+          }
+
+          if (currentAnswerToken) {
+            setCurrentAnswerToken("");
+          }
+
+          if (updated) {
+            lastUpdate = now; // Reset timer only if we updated anything
+          }
+        }
+
+        flushBuffers(); // Schedule next frame
+      });
+    };
+
+    flushBuffers(); // Initial call
+
+    return () => {
+      cancelAnimationFrame(rafId); // Clean-up properly
+    };
+  }, [currentThinkingToken, currentAnswerToken]);
+
+  // Reset completed text when waiting for new response
+  useEffect(() => {
+    if (waitingForFirstToken) {
+      setCompletedThinkingText("");
+      setCompletedAnswerText("");
+      setCurrentThinkingToken("");
+      setCurrentAnswerToken("");
+      setIsAnswering(false);
+
+      // Also reset our token buffers
+      thinkingTokenBufferRef.current = "";
+      answerTokenBufferRef.current = "";
+    }
+  }, [waitingForFirstToken]);
 
   const toggleThinking = () => {
     setShowThinking(!showThinking);
@@ -170,7 +247,7 @@ export function ChatResponse({
       ) : (
         <ScrollArea className="h-full" type="hover" scrollHideDelay={0}>
           <div className="p-4 prose prose-sm max-w-none text-foreground/90 whitespace-pre-wrap font-mono">
-            {/* Thinking section with toggle */}
+            {/* Thinking section */}
             <div className={cn("mb-4", !hasThinkingContent && "hidden")}>
               <div
                 className="flex items-center gap-1 cursor-pointer mb-1 text-muted-foreground hover:text-foreground/70 transition-colors"
@@ -257,14 +334,25 @@ export function ChatResponse({
                     />
                   </>
                 )}
-                <div
-                  className="text-muted-foreground italic text-sm whitespace-pre-wrap relative z-10 h-full"
-                  ref={thinkingRef}
-                >
-                  {!thinkingRef.current?.childNodes.length && (
+                <div className="text-muted-foreground italic text-sm whitespace-pre-wrap relative z-10 h-full">
+                  {!completedThinkingText && !currentThinkingToken ? (
                     <div className="flex items-center justify-center p-4 opacity-50">
                       <Brain className="h-8 w-8 mr-2 opacity-30" />
                       <span>Waiting for thinking process...</span>
+                    </div>
+                  ) : (
+                    <div className="thinking-stream">
+                      {/* Completed thinking tokens */}
+                      <span className="completed-tokens">{completedThinkingText}</span>
+                      {/* Current thinking token with animation */}
+                      {currentThinkingToken && (
+                        <span
+                          key={`thinking-${currentThinkingToken}`}
+                          className="inline opacity-0 animate-token current-token"
+                        >
+                          {currentThinkingToken}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
@@ -272,7 +360,19 @@ export function ChatResponse({
             </div>
 
             {/* Answer section */}
-            <div ref={responseRef}></div>
+            <div className="answer-stream">
+              {/* Completed answer tokens */}
+              <span className="completed-tokens">{completedAnswerText}</span>
+              {/* Current answer token with animation */}
+              {currentAnswerToken && (
+                <span
+                  key={`answer-${currentAnswerToken}`}
+                  className="inline opacity-0 animate-token current-token"
+                >
+                  {currentAnswerToken}
+                </span>
+              )}
+            </div>
           </div>
         </ScrollArea>
       )}
