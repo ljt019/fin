@@ -104,6 +104,20 @@
   }
 }
 
+@keyframes pulse-subtle {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
 .animate-token {
   animation: fadeInLeftToRight 0.3s ease-out forwards;
   white-space: pre-wrap;

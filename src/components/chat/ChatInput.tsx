@@ -1,4 +1,7 @@
-import React, { useRef, useEffect } from "react";
+"use client";
+
+import type React from "react";
+import { useRef, useEffect } from "react";
 import { Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -34,40 +37,52 @@ export function ChatInput({ input, setInput, onSubmit, isLoading }: ChatInputPro
   };
 
   return (
-    <div className="w-full mb-4 flex-shrink-0">
-      <form onSubmit={onSubmit} className="w-full flex gap-2 relative">
+    <div className="w-full mb-4">
+      <form
+        onSubmit={onSubmit}
+        className="w-full flex items-end gap-2 rounded-[var(--radius)] bg-card/50 ring-1 ring-border"
+      >
         <Textarea
           ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Type your message here..."
-          className="resize-none flex-1 min-h-[44px] max-h-[200px] border-none bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-muted-foreground/50"
+          className="resize-none flex-1 min-h-[44px] max-h-[200px] border-none bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 py-3 px-4"
           disabled={isLoading}
         />
         <Button
           type="submit"
           size="icon"
-          disabled={isLoading}
+          disabled={isLoading || !input.trim()}
           className={cn(
-            "h-10 w-10 rounded-full shrink-0 self-end transition-all",
-            "bg-transparent hover:bg-foreground/10 text-foreground",
-            isLoading && "opacity-50"
+            "h-8 w-8 rounded-full mb-3 mr-3",
+            "bg-primary text-primary-foreground",
+            (!input.trim() || isLoading) && "opacity-50"
           )}
         >
-          <Send
-            className={cn("h-4 w-4 transition-transform", isLoading ? "opacity-0" : "opacity-100")}
-          />
-          {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="h-4 w-4 border-2 border-foreground/30 border-t-foreground/80 rounded-full animate-spin"></div>
-            </div>
+          {isLoading ? (
+            <div className="h-4 w-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+          ) : (
+            <Send className="h-4 w-4" />
           )}
           <span className="sr-only">Send message</span>
         </Button>
       </form>
 
-      <div className="text-xs text-muted-foreground/50 text-center mt-2">Press Enter to send</div>
+      <div className="flex justify-center mt-2">
+        <div className="text-xs text-muted-foreground select-none flex items-center gap-1">
+          <kbd className="px-1.5 py-0.5 bg-card rounded-[var(--radius-sm)] text-[10px] font-medium">
+            Enter
+          </kbd>
+          <span>to send</span>
+          <span className="mx-1 text-muted-foreground/30">•</span>
+          <kbd className="px-1.5 py-0.5 bg-card rounded-[var(--radius-sm)] text-[10px] font-medium">
+            Shift + Enter
+          </kbd>
+          <span>for new line</span>
+        </div>
+      </div>
     </div>
   );
 }
