@@ -60,17 +60,34 @@ export function ChatResponse({
       // Split by newlines to properly handle paragraph breaks
       const lines = thinkingBufferRef.current.split("\n");
 
-      lines.forEach((line, index) => {
+      // Skip empty lines at the beginning of a response
+      let startIndex = 0;
+      if (thinkingRef.current.childNodes.length === 0) {
+        // If this is the first content being added, skip initial empty lines
+        while (startIndex < lines.length && lines[startIndex].trim() === "") {
+          startIndex++;
+        }
+      }
+
+      lines.slice(startIndex).forEach((line, index) => {
         // Add the text content
         if (line.length > 0) {
-          const span = document.createElement("span");
-          span.textContent = line;
-          span.className = "inline-block opacity-0 animate-token";
-          fragment.appendChild(span);
+          // Instead of one span, we'll create word-level spans to handle wrapping better
+          const words = line.split(/(\s+)/); // Split by spaces, but keep the spaces
+
+          words.forEach((word) => {
+            if (word.length > 0) {
+              const span = document.createElement("span");
+              span.textContent = word;
+              // Display inline to allow natural text wrapping
+              span.className = "inline opacity-0 animate-token";
+              fragment.appendChild(span);
+            }
+          });
         }
 
         // Add line break if not the last line
-        if (index < lines.length - 1) {
+        if (index < lines.length - startIndex - 1) {
           fragment.appendChild(document.createElement("br"));
         }
       });
@@ -90,17 +107,34 @@ export function ChatResponse({
       // Split by newlines to properly handle paragraph breaks
       const lines = answerBufferRef.current.split("\n");
 
-      lines.forEach((line, index) => {
+      // Skip empty lines at the beginning of a response
+      let startIndex = 0;
+      if (responseRef.current.childNodes.length === 0) {
+        // If this is the first content being added, skip initial empty lines
+        while (startIndex < lines.length && lines[startIndex].trim() === "") {
+          startIndex++;
+        }
+      }
+
+      lines.slice(startIndex).forEach((line, index) => {
         // Add the text content
         if (line.length > 0) {
-          const span = document.createElement("span");
-          span.textContent = line;
-          span.className = "inline-block opacity-0 animate-token";
-          fragment.appendChild(span);
+          // Instead of one span, we'll create word-level spans to handle wrapping better
+          const words = line.split(/(\s+)/); // Split by spaces, but keep the spaces
+
+          words.forEach((word) => {
+            if (word.length > 0) {
+              const span = document.createElement("span");
+              span.textContent = word;
+              // Display inline to allow natural text wrapping
+              span.className = "inline opacity-0 animate-token";
+              fragment.appendChild(span);
+            }
+          });
         }
 
         // Add line break if not the last line
-        if (index < lines.length - 1) {
+        if (index < lines.length - startIndex - 1) {
           fragment.appendChild(document.createElement("br"));
         }
       });
