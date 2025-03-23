@@ -184,12 +184,57 @@ export function ChatResponse({
 
               <div
                 className={cn(
-                  "overflow-hidden transition-all duration-300 bg-card/50 rounded-[var(--radius-sm)]",
+                  "overflow-hidden transition-all duration-300 relative rounded-[var(--radius-sm)]",
                   showThinking ? "max-h-[500px] opacity-100 p-3" : "max-h-0 opacity-0 py-0 px-3"
                 )}
               >
+                {/* Gradient border overlay - Top */}
+                {showThinking && (
+                  <>
+                    {/* Top border - moves right */}
+                    <div
+                      className="absolute top-0 left-0 right-0 h-[2px] pointer-events-none"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(to right, var(--header-gradient-start) 0, var(--header-gradient-start) 4px, transparent 4px, transparent 8px)`,
+                        opacity: 0.7,
+                        animation: "moveDotRight 3s linear infinite",
+                        zIndex: 1,
+                      }}
+                    />
+                    {/* Left border - moves UP for clockwise flow */}
+                    <div
+                      className="absolute top-0 left-0 bottom-0 w-[2px] pointer-events-none"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(to bottom, var(--header-gradient-start) 0, var(--header-gradient-start) 4px, transparent 4px, transparent 8px)`,
+                        opacity: 0.7,
+                        animation: "moveDotUp 3s linear infinite",
+                        zIndex: 1,
+                      }}
+                    />
+                    {/* Right border - moves DOWN for clockwise flow */}
+                    <div
+                      className="absolute top-0 right-0 bottom-0 w-[2px] pointer-events-none"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(to bottom, var(--header-gradient-end) 0, var(--header-gradient-end) 4px, transparent 4px, transparent 8px)`,
+                        opacity: 0.7,
+                        animation: "moveDotDown 3s linear infinite",
+                        zIndex: 1,
+                      }}
+                    />
+                    {/* Bottom border - moves left */}
+                    <div
+                      className="absolute bottom-0 left-0 right-0 h-[2px] pointer-events-none"
+                      style={{
+                        backgroundImage: `repeating-linear-gradient(to right, var(--header-gradient-end) 0, var(--header-gradient-end) 4px, transparent 4px, transparent 8px)`,
+                        opacity: 0.7,
+                        animation: "moveDotLeft 3s linear infinite",
+                        zIndex: 1,
+                      }}
+                    />
+                  </>
+                )}
                 <div
-                  className="text-muted-foreground italic text-sm whitespace-pre-wrap"
+                  className="text-muted-foreground italic text-sm whitespace-pre-wrap relative z-10 h-full"
                   ref={thinkingRef}
                 ></div>
               </div>

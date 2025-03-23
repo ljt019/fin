@@ -136,6 +136,42 @@
   }
 }
 
+@keyframes moveDotRight {
+  0% {
+    background-position: 0px 0px;
+  }
+  100% {
+    background-position: 16px 0px;
+  }
+}
+
+@keyframes moveDotLeft {
+  0% {
+    background-position: 16px 0px;
+  }
+  100% {
+    background-position: 0px 0px;
+  }
+}
+
+@keyframes moveDotDown {
+  0% {
+    background-position: 0px 0px;
+  }
+  100% {
+    background-position: 0px 16px;
+  }
+}
+
+@keyframes moveDotUp {
+  0% {
+    background-position: 0px 16px;
+  }
+  100% {
+    background-position: 0px 0px;
+  }
+}
+
 .animate-shimmer {
   animation: shimmer 3s ease-in-out infinite;
   background-size: 200% 100%;
