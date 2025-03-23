@@ -4,7 +4,7 @@ import type React from "react";
 import { useRef, useEffect, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatResponseProps {
@@ -30,6 +30,7 @@ export function ChatResponse({
   const responseRef = useRef<HTMLDivElement>(null);
   const thinkingRef = useRef<HTMLDivElement>(null);
   const [hasThinkingContent, setHasThinkingContent] = useState(false);
+  const [isAnswering, setIsAnswering] = useState(false);
 
   const scrollToBottom = () => {
     if (viewportRef.current) {
@@ -129,6 +130,9 @@ export function ChatResponse({
   // Process answer tokens
   useEffect(() => {
     if (answerBufferRef.current && responseRef.current) {
+      // We now have answer tokens, so thinking phase is done
+      setIsAnswering(true);
+
       // Process tokens with animation
       processTokens(answerBufferRef.current, responseRef, true);
 
@@ -177,6 +181,26 @@ export function ChatResponse({
                 ) : (
                   <ChevronDown className="h-4 w-4" />
                 )}
+                <Brain
+                  className={cn(
+                    "h-4 w-4 mr-1",
+                    isLoading && !isAnswering && "animate-brain-pulse",
+                    (!isLoading || isAnswering) && hasThinkingContent ? "text-foreground" : ""
+                  )}
+                  style={
+                    isLoading && !isAnswering
+                      ? {
+                          stroke: "url(#brainGradient)",
+                        }
+                      : {}
+                  }
+                />
+                <svg width="0" height="0" className="absolute">
+                  <linearGradient id="brainGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="var(--header-gradient-start)" />
+                    <stop offset="100%" stopColor="var(--header-gradient-end)" />
+                  </linearGradient>
+                </svg>
                 <span className="text-xs font-medium">
                   {showThinking ? "Hide thinking process" : "Show thinking process"}
                 </span>
@@ -236,7 +260,14 @@ export function ChatResponse({
                 <div
                   className="text-muted-foreground italic text-sm whitespace-pre-wrap relative z-10 h-full"
                   ref={thinkingRef}
-                ></div>
+                >
+                  {!thinkingRef.current?.childNodes.length && (
+                    <div className="flex items-center justify-center p-4 opacity-50">
+                      <Brain className="h-8 w-8 mr-2 opacity-30" />
+                      <span>Waiting for thinking process...</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
