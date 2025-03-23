@@ -9,7 +9,11 @@ import { ChatInput } from "./ChatInput";
 export function ChatContainer() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [currentResponse, setCurrentResponse] = useState("");
+  const [showThinking, setShowThinking] = useState(false);
   const [waitingForFirstToken, setWaitingForFirstToken] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const flushInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Add new states just to trigger effects
   const [thinkingTrigger, setThinkingTrigger] = useState(0);
@@ -18,8 +22,6 @@ export function ChatContainer() {
   // Refs to hold the token buffers
   const thinkingBuffer = useRef("");
   const answerBuffer = useRef("");
-
-  const flushInterval = useRef<number | undefined>(undefined);
 
   const flushBuffers = () => {
     if (thinkingBuffer.current) {
@@ -93,7 +95,8 @@ export function ChatContainer() {
       setWaitingForFirstToken(false);
     });
 
-    flushInterval.current = window.setInterval(flushBuffers, 50);
+    // Start the flush interval
+    flushInterval.current = setInterval(flushBuffers, 100) as ReturnType<typeof setInterval>;
 
     return () => {
       unlistenThink.then((fn) => fn());
@@ -103,11 +106,54 @@ export function ChatContainer() {
     };
   }, [waitingForFirstToken]);
 
+  const handleCancel = async () => {
+    try {
+      setIsLoading(false);
+      setWaitingForFirstToken(false);
+      setShowThinking(false);
+      setCurrentResponse("");
+
+      // Clear buffers
+      thinkingBuffer.current = "";
+      answerBuffer.current = "";
+
+      // Reset triggers to clear the response
+      setThinkingTrigger(0);
+      setAnswerTrigger(0);
+
+      // Clear any pending intervals
+      if (flushInterval.current) {
+        clearInterval(flushInterval.current);
+      }
+
+      // Abort any pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      // Call the backend to cancel the generation
+      await invoke("cancel_generation");
+    } catch (error) {
+      console.error("Error cancelling generation:", error);
+      // Ensure we reset all states even if there's an error
+      setIsLoading(false);
+      setWaitingForFirstToken(false);
+      setShowThinking(false);
+      setCurrentResponse("");
+      thinkingBuffer.current = "";
+      answerBuffer.current = "";
+      setThinkingTrigger(0);
+      setAnswerTrigger(0);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
     if (!input.trim() || isLoading) return;
 
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
     setIsLoading(true);
     setWaitingForFirstToken(true);
 
@@ -118,14 +164,33 @@ export function ChatContainer() {
     thinkingBuffer.current = "";
     answerBuffer.current = "";
 
-    const result = await tryCatch(invoke("prompt_model", { prompt: input }));
+    // Clear the input
+    setInput("");
+
+    const result = await tryCatch(
+      invoke("prompt_model", {
+        prompt: input,
+        signal: abortControllerRef.current.signal,
+      })
+    );
 
     if (result.error) {
+      if (result.error.name === "AbortError") {
+        // Handle abort gracefully
+        return;
+      }
       answerBuffer.current = "Error: " + String(result.error);
       setAnswerTrigger((prev) => prev + 1);
       setIsLoading(false);
       setWaitingForFirstToken(false);
     }
+  };
+
+  const handleExampleQuestionClick = (question: string) => {
+    setInput(question);
+    // Submit the form programmatically
+    const form = document.querySelector("form");
+    if (form) form.requestSubmit();
   };
 
   return (
@@ -139,12 +204,14 @@ export function ChatContainer() {
           answerBufferRef={answerBuffer}
           waitingForFirstToken={waitingForFirstToken}
           isLoading={isLoading}
+          onExampleQuestionClick={handleExampleQuestionClick}
         />
         <ChatInput
           input={input}
           setInput={setInput}
           onSubmit={handleSubmit}
           isLoading={isLoading}
+          onCancel={handleCancel}
         />
       </div>
     </div>

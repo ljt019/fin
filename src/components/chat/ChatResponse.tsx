@@ -4,8 +4,10 @@ import type React from "react";
 import { useRef, useEffect, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
-import { ChevronDown, ChevronUp, Brain } from "lucide-react";
+import { ChevronDown, ChevronUp, Brain, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ChatEmptyState } from "./ChatEmptyState";
+import { Button } from "@/components/ui/button";
 
 interface ChatResponseProps {
   thinkingTrigger: number;
@@ -14,6 +16,7 @@ interface ChatResponseProps {
   isLoading: boolean;
   thinkingBufferRef: React.MutableRefObject<string>;
   answerBufferRef: React.MutableRefObject<string>;
+  onExampleQuestionClick: (question: string) => void;
 }
 
 type Token = { id: number; text: string };
@@ -25,6 +28,7 @@ export function ChatResponse({
   answerBufferRef,
   waitingForFirstToken,
   isLoading,
+  onExampleQuestionClick,
 }: ChatResponseProps) {
   const [showThinking, setShowThinking] = useState(true);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -193,6 +197,12 @@ export function ChatResponse({
     setShowThinking(!showThinking);
   };
 
+  const hasContent =
+    thinkingTokens.length > 0 ||
+    answerTokens.length > 0 ||
+    committedThinkingText ||
+    committedAnswerText;
+
   return (
     <Card
       className="flex-1 min-h-0 mb-6 bg-primary/2 border-none shadow-sm overflow-hidden"
@@ -215,6 +225,8 @@ export function ChatResponse({
             ></div>
           </div>
         </div>
+      ) : !hasContent ? (
+        <ChatEmptyState onQuestionClick={onExampleQuestionClick} />
       ) : (
         <ScrollArea className="h-full" type="hover" scrollHideDelay={0}>
           <div className="p-4 prose prose-sm max-w-none text-foreground/90 whitespace-pre-wrap font-mono">

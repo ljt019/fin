@@ -1,6 +1,13 @@
 mod llama;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::JoinHandle;
 use tauri::Emitter;
+
+// Static reference to track the current generation thread
+static GENERATION_THREAD: std::sync::Mutex<Option<JoinHandle<()>>> = std::sync::Mutex::new(None);
+static SHOULD_CANCEL: AtomicBool = AtomicBool::new(false);
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -8,7 +15,21 @@ fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
+fn cancel_generation() -> Result<(), String> {
+    SHOULD_CANCEL.store(true, Ordering::SeqCst);
+    if let Some(handle) = GENERATION_THREAD.lock().unwrap().take() {
+        handle
+            .join()
+            .map_err(|e| format!("Failed to join thread: {:?}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn prompt_model(window: tauri::Window, prompt: &str) -> Result<(), String> {
+    // Reset cancel flag
+    SHOULD_CANCEL.store(false, Ordering::SeqCst);
+
     // Clone the prompt string so the thread owns it
     let prompt = prompt.to_string();
 
@@ -41,14 +62,20 @@ Fin is now being connected with a person.
 ";
 
     // Start a new thread for model processing
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         // Define separate callbacks for answer and thought tokens
         let answer_callback = move |token: String| {
+            if SHOULD_CANCEL.load(Ordering::SeqCst) {
+                return;
+            }
             println!("Answer token: {:?}", token);
             let _ = answer_window.emit("model-answer-token", token);
         };
 
         let thought_callback = move |token: String| {
+            if SHOULD_CANCEL.load(Ordering::SeqCst) {
+                return;
+            }
             println!("Thought token: {:?}", token);
             let _ = thought_window.emit("model-thought-token", token);
         };
@@ -60,6 +87,9 @@ Fin is now being connected with a person.
         let _ = complete_window.emit("model-complete", ());
     });
 
+    // Store the thread handle
+    *GENERATION_THREAD.lock().unwrap() = Some(handle);
+
     Ok(())
 }
 
@@ -67,7 +97,11 @@ Fin is now being connected with a person.
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, prompt_model])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            prompt_model,
+            cancel_generation
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

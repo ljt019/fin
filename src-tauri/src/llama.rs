@@ -1,8 +1,10 @@
+use crate::SHOULD_CANCEL;
 use llama_cpp::standard_sampler::StandardSampler;
 use llama_cpp::LlamaModel;
 use llama_cpp::LlamaParams;
 use llama_cpp::SessionParams;
 use regex::Regex;
+use std::sync::atomic::Ordering;
 use tokenizers::Tokenizer;
 
 const MODEL_FILE_PATH: &str =
@@ -101,6 +103,11 @@ pub fn prompt<FA, FT>(
     let mut state = ParseState::Idle;
 
     for token in completion_handle {
+        // Check for cancellation
+        if SHOULD_CANCEL.load(Ordering::SeqCst) {
+            break;
+        }
+
         let token_id = token.0 as u32;
 
         let decoded_text = tokenizer
