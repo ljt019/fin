@@ -125,6 +125,25 @@
   white-space: pre-wrap;
   display: inline;
   will-change: opacity, transform;
+  animation-fill-mode: forwards;
+  animation-iteration-count: 1;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  perspective: 1000px;
+}
+
+.committed-tokens {
+  white-space: pre-wrap;
+  display: inline;
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.thinking-stream,
+.answer-stream {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 @keyframes shimmer {
@@ -133,42 +152,6 @@
   }
   100% {
     background-position: 200% center;
-  }
-}
-
-@keyframes moveDotRight {
-  0% {
-    background-position: 0px 0px;
-  }
-  100% {
-    background-position: 16px 0px;
-  }
-}
-
-@keyframes moveDotLeft {
-  0% {
-    background-position: 16px 0px;
-  }
-  100% {
-    background-position: 0px 0px;
-  }
-}
-
-@keyframes moveDotDown {
-  0% {
-    background-position: 0px 0px;
-  }
-  100% {
-    background-position: 0px 16px;
-  }
-}
-
-@keyframes moveDotUp {
-  0% {
-    background-position: 0px 16px;
-  }
-  100% {
-    background-position: 0px 0px;
   }
 }
 

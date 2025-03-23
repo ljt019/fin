@@ -16,6 +16,8 @@ interface ChatResponseProps {
   answerBufferRef: React.MutableRefObject<string>;
 }
 
+type Token = { id: number; text: string };
+
 export function ChatResponse({
   thinkingTrigger,
   answerTrigger,
@@ -30,23 +32,18 @@ export function ChatResponse({
   const [hasThinkingContent, setHasThinkingContent] = useState(false);
   const [isAnswering, setIsAnswering] = useState(false);
 
-  // Thinking states
-  const [completedThinkingText, setCompletedThinkingText] = useState("");
-  const [currentThinkingToken, setCurrentThinkingToken] = useState("");
+  // Token arrays and committed text for thinking and answer
+  const [thinkingTokens, setThinkingTokens] = useState<Token[]>([]);
+  const [answerTokens, setAnswerTokens] = useState<Token[]>([]);
+  const [committedThinkingText, setCommittedThinkingText] = useState("");
+  const [committedAnswerText, setCommittedAnswerText] = useState("");
 
-  // Answering states
-  const [completedAnswerText, setCompletedAnswerText] = useState("");
-  const [currentAnswerToken, setCurrentAnswerToken] = useState("");
-
-  // References for animation timing
-  const lastThinkingUpdateRef = useRef<number>(0);
-  const lastAnswerUpdateRef = useRef<number>(0);
-  const animationFrameIdRef = useRef<number | null>(null);
-  const TARGET_FRAME_DURATION = 50; // Target ~50ms between updates
-
-  // Create persistent token buffer refs outside the effect
-  const thinkingTokenBufferRef = useRef<string>("");
-  const answerTokenBufferRef = useRef<string>("");
+  // Refs for performance optimization
+  const committedThinkingRef = useRef("");
+  const committedAnswerRef = useRef("");
+  const tokenId = useRef(0); // Shared counter for unique token IDs
+  const MAX_BUFFER = 20; // Maximum number of tokens to keep animated
+  const AGGRESSIVE_BUFFER = 100; // Threshold for aggressive flushing
 
   const scrollToBottom = () => {
     if (viewportRef.current) {
@@ -73,14 +70,64 @@ export function ChatResponse({
   // Scroll to bottom when new content is added
   useEffect(() => {
     scrollToBottom();
-  }, [thinkingTrigger, answerTrigger, waitingForFirstToken]);
+  }, [thinkingTokens.length, answerTokens.length, committedThinkingText, committedAnswerText]);
 
   // Reset state when waiting for a new response
   useEffect(() => {
     if (waitingForFirstToken) {
       setIsAnswering(false);
+      setThinkingTokens([]);
+      setAnswerTokens([]);
+      setCommittedThinkingText("");
+      setCommittedAnswerText("");
+      committedThinkingRef.current = "";
+      committedAnswerRef.current = "";
+      tokenId.current = 0; // Reset the token ID counter
     }
   }, [waitingForFirstToken]);
+
+  // Token buffer compression for thinking tokens
+  useEffect(() => {
+    if (thinkingTokens.length > MAX_BUFFER) {
+      const toCommit = thinkingTokens.slice(0, thinkingTokens.length - MAX_BUFFER);
+      const newCommittedText = toCommit.map((t) => t.text).join("");
+      setCommittedThinkingText((prev) => prev + newCommittedText);
+      committedThinkingRef.current += newCommittedText;
+      setThinkingTokens((prev) => prev.slice(-MAX_BUFFER));
+    }
+  }, [thinkingTokens]);
+
+  // Token buffer compression for answer tokens
+  useEffect(() => {
+    if (answerTokens.length > MAX_BUFFER) {
+      const toCommit = answerTokens.slice(0, answerTokens.length - MAX_BUFFER);
+      const newCommittedText = toCommit.map((t) => t.text).join("");
+      setCommittedAnswerText((prev) => prev + newCommittedText);
+      committedAnswerRef.current += newCommittedText;
+      setAnswerTokens((prev) => prev.slice(-MAX_BUFFER));
+    }
+  }, [answerTokens]);
+
+  // Aggressive buffer compression if tokens accumulate too much
+  useEffect(() => {
+    if (thinkingTokens.length > AGGRESSIVE_BUFFER) {
+      const toCommit = thinkingTokens.slice(0, thinkingTokens.length - MAX_BUFFER);
+      const newCommittedText = toCommit.map((t) => t.text).join("");
+      setCommittedThinkingText((prev) => prev + newCommittedText);
+      committedThinkingRef.current += newCommittedText;
+      setThinkingTokens((prev) => prev.slice(-MAX_BUFFER));
+    }
+  }, [thinkingTokens]);
+
+  useEffect(() => {
+    if (answerTokens.length > AGGRESSIVE_BUFFER) {
+      const toCommit = answerTokens.slice(0, answerTokens.length - MAX_BUFFER);
+      const newCommittedText = toCommit.map((t) => t.text).join("");
+      setCommittedAnswerText((prev) => prev + newCommittedText);
+      committedAnswerRef.current += newCommittedText;
+      setAnswerTokens((prev) => prev.slice(-MAX_BUFFER));
+    }
+  }, [answerTokens]);
 
   // Process thinking tokens
   useEffect(() => {
@@ -94,22 +141,22 @@ export function ChatResponse({
 
       // Split by newlines and words, preserving spaces
       const lines = thinkingBufferRef.current.split("\n");
-      const tokens: string[] = [];
+      const tokens: Token[] = [];
 
       lines.forEach((line, index) => {
         if (line.length > 0) {
           // Split by spaces but keep the spaces
           const words = line.split(/(\s+)/);
-          tokens.push(...words);
+          tokens.push(...words.map((text) => ({ id: tokenId.current++, text })));
         }
         // Add line break if not the last line
         if (index < lines.length - 1) {
-          tokens.push("\n");
+          tokens.push({ id: tokenId.current++, text: "\n" });
         }
       });
 
-      // Update the current thinking token
-      setCurrentThinkingToken(tokens.join(""));
+      // Add new tokens to the array
+      setThinkingTokens((prev) => [...prev, ...tokens]);
       thinkingBufferRef.current = "";
     }
   }, [thinkingTrigger]);
@@ -122,101 +169,25 @@ export function ChatResponse({
 
       // Split by newlines and words, preserving spaces
       const lines = answerBufferRef.current.split("\n");
-      const tokens: string[] = [];
+      const tokens: Token[] = [];
 
       lines.forEach((line, index) => {
         if (line.length > 0) {
           // Split by spaces but keep the spaces
           const words = line.split(/(\s+)/);
-          tokens.push(...words);
+          tokens.push(...words.map((text) => ({ id: tokenId.current++, text })));
         }
         // Add line break if not the last line
         if (index < lines.length - 1) {
-          tokens.push("\n");
+          tokens.push({ id: tokenId.current++, text: "\n" });
         }
       });
 
-      // Update the current answer token
-      setCurrentAnswerToken(tokens.join(""));
+      // Add new tokens to the array
+      setAnswerTokens((prev) => [...prev, ...tokens]);
       answerBufferRef.current = "";
     }
   }, [answerTrigger]);
-
-  // Combined token batching logic using requestAnimationFrame
-  useEffect(() => {
-    let rafId: number;
-    let lastUpdate = performance.now();
-
-    // Add new tokens to our persistent buffers
-    if (currentThinkingToken) {
-      thinkingTokenBufferRef.current += currentThinkingToken;
-    }
-
-    if (currentAnswerToken) {
-      answerTokenBufferRef.current += currentAnswerToken;
-    }
-
-    const flushBuffers = () => {
-      rafId = requestAnimationFrame((now) => {
-        const elapsed = now - lastUpdate;
-
-        // Change back to 100ms as requested
-        if (elapsed >= 100) {
-          let updated = false;
-
-          // Process thinking tokens if we have any
-          if (thinkingTokenBufferRef.current) {
-            setCompletedThinkingText((prev) => prev + thinkingTokenBufferRef.current);
-            thinkingTokenBufferRef.current = ""; // Clear buffer after processing
-            updated = true;
-          }
-
-          // Process answer tokens if we have any
-          if (answerTokenBufferRef.current) {
-            setCompletedAnswerText((prev) => prev + answerTokenBufferRef.current);
-            answerTokenBufferRef.current = ""; // Clear buffer after processing
-            updated = true;
-          }
-
-          // Clear current token states
-          if (currentThinkingToken) {
-            setCurrentThinkingToken("");
-          }
-
-          if (currentAnswerToken) {
-            setCurrentAnswerToken("");
-          }
-
-          if (updated) {
-            lastUpdate = now; // Reset timer only if we updated anything
-          }
-        }
-
-        flushBuffers(); // Schedule next frame
-      });
-    };
-
-    flushBuffers(); // Initial call
-
-    return () => {
-      cancelAnimationFrame(rafId); // Clean-up properly
-    };
-  }, [currentThinkingToken, currentAnswerToken]);
-
-  // Reset completed text when waiting for new response
-  useEffect(() => {
-    if (waitingForFirstToken) {
-      setCompletedThinkingText("");
-      setCompletedAnswerText("");
-      setCurrentThinkingToken("");
-      setCurrentAnswerToken("");
-      setIsAnswering(false);
-
-      // Also reset our token buffers
-      thinkingTokenBufferRef.current = "";
-      answerTokenBufferRef.current = "";
-    }
-  }, [waitingForFirstToken]);
 
   const toggleThinking = () => {
     setShowThinking(!showThinking);
@@ -292,67 +263,60 @@ export function ChatResponse({
                 {/* Gradient border overlay - Top */}
                 {showThinking && (
                   <>
-                    {/* Top border - moves right */}
+                    {/* Top border */}
                     <div
                       className="absolute top-0 left-0 right-0 h-[2px] pointer-events-none"
                       style={{
                         backgroundImage: `repeating-linear-gradient(to right, var(--header-gradient-start) 0, var(--header-gradient-start) 4px, transparent 4px, transparent 8px)`,
                         opacity: 0.7,
-                        animation: "moveDotRight 3s linear infinite",
                         zIndex: 1,
                       }}
                     />
-                    {/* Left border - moves UP for clockwise flow */}
+                    {/* Left border */}
                     <div
                       className="absolute top-0 left-0 bottom-0 w-[2px] pointer-events-none"
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, var(--header-gradient-start) 0, var(--header-gradient-start) 4px, transparent 4px, transparent 8px)`,
                         opacity: 0.7,
-                        animation: "moveDotUp 3s linear infinite",
                         zIndex: 1,
                       }}
                     />
-                    {/* Right border - moves DOWN for clockwise flow */}
+                    {/* Right border */}
                     <div
                       className="absolute top-0 right-0 bottom-0 w-[2px] pointer-events-none"
                       style={{
                         backgroundImage: `repeating-linear-gradient(to bottom, var(--header-gradient-end) 0, var(--header-gradient-end) 4px, transparent 4px, transparent 8px)`,
                         opacity: 0.7,
-                        animation: "moveDotDown 3s linear infinite",
                         zIndex: 1,
                       }}
                     />
-                    {/* Bottom border - moves left */}
+                    {/* Bottom border */}
                     <div
                       className="absolute bottom-0 left-0 right-0 h-[2px] pointer-events-none"
                       style={{
                         backgroundImage: `repeating-linear-gradient(to right, var(--header-gradient-end) 0, var(--header-gradient-end) 4px, transparent 4px, transparent 8px)`,
                         opacity: 0.7,
-                        animation: "moveDotLeft 3s linear infinite",
                         zIndex: 1,
                       }}
                     />
                   </>
                 )}
                 <div className="text-muted-foreground italic text-sm whitespace-pre-wrap relative z-10 h-full">
-                  {!completedThinkingText && !currentThinkingToken ? (
+                  {thinkingTokens.length === 0 && !committedThinkingText ? (
                     <div className="flex items-center justify-center p-4 opacity-50">
                       <Brain className="h-8 w-8 mr-2 opacity-30" />
                       <span>Waiting for thinking process...</span>
                     </div>
                   ) : (
                     <div className="thinking-stream">
-                      {/* Completed thinking tokens */}
-                      <span className="completed-tokens">{completedThinkingText}</span>
-                      {/* Current thinking token with animation */}
-                      {currentThinkingToken && (
-                        <span
-                          key={`thinking-${currentThinkingToken}`}
-                          className="inline opacity-0 animate-token current-token"
-                        >
-                          {currentThinkingToken}
+                      {/* Static committed tokens */}
+                      <span className="committed-tokens">{committedThinkingText}</span>
+                      {/* Animated streaming tokens */}
+                      {thinkingTokens.map((token) => (
+                        <span key={`thinking-${token.id}`} className="animate-token">
+                          {token.text}
                         </span>
-                      )}
+                      ))}
                     </div>
                   )}
                 </div>
@@ -361,17 +325,14 @@ export function ChatResponse({
 
             {/* Answer section */}
             <div className="answer-stream">
-              {/* Completed answer tokens */}
-              <span className="completed-tokens">{completedAnswerText}</span>
-              {/* Current answer token with animation */}
-              {currentAnswerToken && (
-                <span
-                  key={`answer-${currentAnswerToken}`}
-                  className="inline opacity-0 animate-token current-token"
-                >
-                  {currentAnswerToken}
+              {/* Static committed tokens */}
+              <span className="committed-tokens">{committedAnswerText}</span>
+              {/* Animated streaming tokens */}
+              {answerTokens.map((token) => (
+                <span key={`answer-${token.id}`} className="animate-token">
+                  {token.text}
                 </span>
-              )}
+              ))}
             </div>
           </div>
         </ScrollArea>
