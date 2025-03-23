@@ -1,6 +1,11 @@
-import React, { useRef, useEffect } from "react";
+"use client";
+
+import type React from "react";
+import { useRef, useEffect, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface ChatResponseProps {
   thinkingTrigger: number;
@@ -19,10 +24,12 @@ export function ChatResponse({
   waitingForFirstToken,
   isLoading,
 }: ChatResponseProps) {
+  const [showThinking, setShowThinking] = useState(true); // Start expanded
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const responseRef = useRef<HTMLDivElement>(null);
   const thinkingRef = useRef<HTMLDivElement>(null);
+  const [hasThinkingContent, setHasThinkingContent] = useState(false);
 
   const scrollToBottom = () => {
     if (viewportRef.current) {
@@ -51,99 +58,88 @@ export function ChatResponse({
     scrollToBottom();
   }, [thinkingTrigger, answerTrigger, waitingForFirstToken]);
 
-  // Append only new thinking tokens
-  useEffect(() => {
-    if (thinkingBufferRef.current && thinkingRef.current) {
-      // Create a document fragment to batch DOM changes
-      const fragment = document.createDocumentFragment();
+  // Helper function to process tokens with animation
+  const processTokens = (
+    text: string,
+    containerRef: React.RefObject<HTMLDivElement>,
+    isFirstContent: boolean
+  ) => {
+    if (!text || !containerRef.current) return;
 
-      // Split by newlines to properly handle paragraph breaks
-      const lines = thinkingBufferRef.current.split("\n");
+    // Create a document fragment to batch DOM changes
+    const fragment = document.createDocumentFragment();
 
-      // Skip empty lines at the beginning of a response
-      let startIndex = 0;
-      if (thinkingRef.current.childNodes.length === 0) {
-        // If this is the first content being added, skip initial empty lines
-        while (startIndex < lines.length && lines[startIndex].trim() === "") {
-          startIndex++;
-        }
+    // Split by newlines to properly handle paragraph breaks
+    const lines = text.split("\n");
+
+    // Skip empty lines at the beginning if this is the first content
+    let startIndex = 0;
+    if (isFirstContent && containerRef.current.childNodes.length === 0) {
+      while (startIndex < lines.length && lines[startIndex].trim() === "") {
+        startIndex++;
+      }
+    }
+
+    lines.slice(startIndex).forEach((line, index) => {
+      // Add the text content
+      if (line.length > 0) {
+        // Split by spaces, but keep the spaces
+        const words = line.split(/(\s+)/);
+
+        words.forEach((word) => {
+          if (word.length > 0) {
+            const span = document.createElement("span");
+            span.textContent = word;
+            // Display inline to allow natural text wrapping
+            span.className = "inline opacity-0 animate-token";
+            fragment.appendChild(span);
+          }
+        });
       }
 
-      lines.slice(startIndex).forEach((line, index) => {
-        // Add the text content
-        if (line.length > 0) {
-          // Instead of one span, we'll create word-level spans to handle wrapping better
-          const words = line.split(/(\s+)/); // Split by spaces, but keep the spaces
+      // Add line break if not the last line
+      if (index < lines.length - startIndex - 1) {
+        fragment.appendChild(document.createElement("br"));
+      }
+    });
 
-          words.forEach((word) => {
-            if (word.length > 0) {
-              const span = document.createElement("span");
-              span.textContent = word;
-              // Display inline to allow natural text wrapping
-              span.className = "inline opacity-0 animate-token";
-              fragment.appendChild(span);
-            }
-          });
-        }
+    // Append all changes at once
+    containerRef.current.appendChild(fragment);
+  };
 
-        // Add line break if not the last line
-        if (index < lines.length - startIndex - 1) {
-          fragment.appendChild(document.createElement("br"));
-        }
-      });
+  // Process thinking tokens
+  useEffect(() => {
+    if (thinkingBufferRef.current && thinkingRef.current) {
+      // If we have any content, make sure the section is visible
+      if (thinkingBufferRef.current.trim() !== "") {
+        setHasThinkingContent(true);
+      }
 
-      // Append all changes at once
-      thinkingRef.current.appendChild(fragment);
-      thinkingBufferRef.current = ""; // clear buffer
+      // Process tokens with the same animation as answer tokens
+      processTokens(thinkingBufferRef.current, thinkingRef, true);
+
+      // Clear the buffer
+      thinkingBufferRef.current = "";
+
+      // Force scroll update
+      setTimeout(scrollToBottom, 0);
     }
   }, [thinkingTrigger]);
 
-  // Append only new answer tokens
+  // Process answer tokens
   useEffect(() => {
     if (answerBufferRef.current && responseRef.current) {
-      // Create a document fragment to batch DOM changes
-      const fragment = document.createDocumentFragment();
+      // Process tokens with animation
+      processTokens(answerBufferRef.current, responseRef, true);
 
-      // Split by newlines to properly handle paragraph breaks
-      const lines = answerBufferRef.current.split("\n");
-
-      // Skip empty lines at the beginning of a response
-      let startIndex = 0;
-      if (responseRef.current.childNodes.length === 0) {
-        // If this is the first content being added, skip initial empty lines
-        while (startIndex < lines.length && lines[startIndex].trim() === "") {
-          startIndex++;
-        }
-      }
-
-      lines.slice(startIndex).forEach((line, index) => {
-        // Add the text content
-        if (line.length > 0) {
-          // Instead of one span, we'll create word-level spans to handle wrapping better
-          const words = line.split(/(\s+)/); // Split by spaces, but keep the spaces
-
-          words.forEach((word) => {
-            if (word.length > 0) {
-              const span = document.createElement("span");
-              span.textContent = word;
-              // Display inline to allow natural text wrapping
-              span.className = "inline opacity-0 animate-token";
-              fragment.appendChild(span);
-            }
-          });
-        }
-
-        // Add line break if not the last line
-        if (index < lines.length - startIndex - 1) {
-          fragment.appendChild(document.createElement("br"));
-        }
-      });
-
-      // Append all changes at once
-      responseRef.current.appendChild(fragment);
-      answerBufferRef.current = ""; // clear buffer
+      // Clear the buffer
+      answerBufferRef.current = "";
     }
   }, [answerTrigger]);
+
+  const toggleThinking = () => {
+    setShowThinking(!showThinking);
+  };
 
   return (
     <Card
@@ -170,7 +166,36 @@ export function ChatResponse({
       ) : (
         <ScrollArea className="h-full" type="hover" scrollHideDelay={0}>
           <div className="p-4 prose prose-sm max-w-none text-foreground/90 whitespace-pre-wrap font-mono">
-            <div className="text-muted-foreground italic" ref={thinkingRef}></div>
+            {/* Thinking section with toggle */}
+            <div className={cn("mb-4", !hasThinkingContent && "hidden")}>
+              <div
+                className="flex items-center gap-1 cursor-pointer mb-1 text-muted-foreground hover:text-foreground/70 transition-colors"
+                onClick={toggleThinking}
+              >
+                {showThinking ? (
+                  <ChevronUp className="h-4 w-4" />
+                ) : (
+                  <ChevronDown className="h-4 w-4" />
+                )}
+                <span className="text-xs font-medium">
+                  {showThinking ? "Hide thinking process" : "Show thinking process"}
+                </span>
+              </div>
+
+              <div
+                className={cn(
+                  "overflow-hidden transition-all duration-300 bg-card/50 rounded-[var(--radius-sm)]",
+                  showThinking ? "max-h-[500px] opacity-100 p-3" : "max-h-0 opacity-0 py-0 px-3"
+                )}
+              >
+                <div
+                  className="text-muted-foreground italic text-sm whitespace-pre-wrap"
+                  ref={thinkingRef}
+                ></div>
+              </div>
+            </div>
+
+            {/* Answer section */}
             <div ref={responseRef}></div>
           </div>
         </ScrollArea>
